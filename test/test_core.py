@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from sigstore_models._core import Base, ProtoU64
+from sigstore_models._core import Base, ProtoBytes, ProtoU64
 
 
 class TestBase:
@@ -91,3 +91,54 @@ class TestU64:
 
         with pytest.raises(ValueError):
             Foo.from_json(foo_json)
+
+
+class TestBytes:
+    """
+    Sanity tests for our Protobuf bytes type.
+    """
+
+    # Chosen so that the encoding contains both of the alphabet-specific
+    # characters: standard "+/", URL-safe "-_".
+    RAW = b"\xfb\xff\xfe\x00?>"
+    STANDARD = "+//+AD8+"
+    URLSAFE = "-__-AD8-"
+
+    def test_standard_and_urlsafe(self):
+        class Foo(Base):
+            value: ProtoBytes
+
+        for encoded in (self.STANDARD, self.URLSAFE, self.STANDARD.encode()):
+            assert Foo.from_dict({"value": encoded}).value == self.RAW
+            assert Foo.from_json(json.dumps({"value": self.URLSAFE})).value == self.RAW
+
+    def test_unpadded(self):
+        class Foo(Base):
+            value: ProtoBytes
+
+        assert Foo.from_dict({"value": "aGk"}).value == b"hi"
+        assert Foo.from_dict({"value": "aGk="}).value == b"hi"
+
+    @pytest.mark.parametrize(
+        "tc",
+        (
+            "aGVs bG8=",
+            "aGVs\r\nbG8=",
+            "aGVs!bG8=",
+            "aGVsbG8=!",
+            "aGVsbG8\u00e9",
+            "a",
+            "aGVsb",
+        ),
+    )
+    def test_invalid(self, tc: str):
+        """
+        Ensure that characters outside the base64 alphabet are rejected,
+        not skipped, and that impossible lengths are rejected.
+        """
+
+        class Foo(Base):
+            value: ProtoBytes
+
+        with pytest.raises(ValueError):
+            Foo.from_dict({"value": tc})

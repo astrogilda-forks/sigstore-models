@@ -65,13 +65,28 @@ ProtoU64 = t.Annotated[
 ]
 
 
+_URLSAFE_TO_STANDARD = bytes.maketrans(b"-_", b"+/")
+
+
 def _validate_proto_bytes(value: object) -> bytes:
     if not isinstance(value, (bytes, str)):
         raise ValueError(
             f"Expected protobuf bytes as string or bytes, got {type(value).__name__}"
         )
 
-    return base64.b64decode(value)
+    # The ProtoJSON mapping writes bytes as standard base64 with padding, and
+    # parsers accept either the standard or the URL-safe alphabet, with or
+    # without padding. Characters outside the alphabet are an error rather
+    # than something to skip (RFC 4648, section 3.3).
+    if isinstance(value, str):
+        try:
+            value = value.encode("ascii")
+        except UnicodeEncodeError as e:
+            raise ValueError("Invalid base64-encoded string: non-ASCII data") from e
+
+    value = value.translate(_URLSAFE_TO_STANDARD)
+    value += b"=" * (-len(value) % 4)
+    return base64.b64decode(value, validate=True)
 
 
 def _serialize_proto_bytes(value: bytes) -> bytes:
